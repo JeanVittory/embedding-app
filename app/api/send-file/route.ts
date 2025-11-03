@@ -135,6 +135,7 @@ export async function POST(request: Request) {
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
   } catch (error: any) {
+    console.log("error en send file route", error);
     const message =
       error instanceof Error ? error.message : "We could not process the uploaded document.";
     return NextResponse.json({ error: message }, { status: 500 });

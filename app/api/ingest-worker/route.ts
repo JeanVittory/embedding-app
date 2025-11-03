@@ -150,6 +150,7 @@ export async function POST(req: Request) {
     );
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
   } catch (e: any) {
+    console.log("error en ingest worker route", e);
     await supabase
       .from("documents")
       .update({ status: "error", error_message: String(e?.message ?? e) })
