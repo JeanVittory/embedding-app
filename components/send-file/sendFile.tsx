@@ -1,11 +1,12 @@
 "use client";
 
-import { ChangeEvent, DragEvent, FormEvent, useRef, useState } from "react";
+import { ChangeEvent, DragEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { createClient } from "@/lib/supabase/client";
 
 type FormFields = {
   title: string;
@@ -22,10 +23,53 @@ const SUPPORTED_MIME_TYPES = [
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
 ];
 
+const PAGE_SIZE = 10;
+
 const formatFileSize = (bytes: number) => {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+};
+
+const MIME_EXTENSION_MAP: Record<string, string> = {
+  "application/pdf": "pdf",
+  "application/msword": "doc",
+  "application/vnd.ms-word.document.macroEnabled.12": "docm",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
+  "text/plain": "txt",
+};
+
+const DATE_FORMATTER = new Intl.DateTimeFormat("es-ES", {
+  dateStyle: "medium",
+  timeStyle: "short",
+});
+
+type DocumentRecord = {
+  id: number;
+  title: string;
+  mimetype: string | null;
+  created_at: string;
+  status: string | null;
+};
+
+const formatMimeType = (value: string | null) => {
+  if (!value) return "—";
+  const mapped = MIME_EXTENSION_MAP[value];
+  if (mapped) return mapped;
+
+  const afterSlash = value.includes("/") ? value.split("/").pop() ?? value : value;
+  const afterDot = afterSlash.includes(".")
+    ? afterSlash.slice(afterSlash.lastIndexOf(".") + 1)
+    : afterSlash;
+  return afterDot.replace(/[^a-z0-9+]/gi, "").toLowerCase() || "—";
+};
+
+const formatDate = (value: string) => {
+  try {
+    return DATE_FORMATTER.format(new Date(value));
+  } catch {
+    return value;
+  }
 };
 
 export default function SendFilePage() {
@@ -35,6 +79,12 @@ export default function SendFilePage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [documents, setDocuments] = useState<DocumentRecord[]>([]);
+  const [documentsError, setDocumentsError] = useState<string | null>(null);
+  const [isLoadingDocuments, setIsLoadingDocuments] = useState(false);
+  const [page, setPage] = useState(0);
+  const [totalDocuments, setTotalDocuments] = useState(0);
+  const [refreshIndex, setRefreshIndex] = useState(0);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const handleTextChange =
@@ -91,6 +141,58 @@ export default function SendFilePage() {
     }
   };
 
+  useEffect(() => {
+    let isMounted = true;
+
+    const fetchDocuments = async () => {
+      setIsLoadingDocuments(true);
+      setDocumentsError(null);
+      const supabase = createClient();
+      const rangeStart = page * PAGE_SIZE;
+      const rangeEnd = rangeStart + PAGE_SIZE - 1;
+
+      const { data, error, count } = await supabase
+        .from("documents")
+        .select("id,title,mimetype,created_at,status", { count: "exact" })
+        .order("created_at", { ascending: false })
+        .range(rangeStart, rangeEnd);
+
+      if (!isMounted) return;
+
+      if (error) {
+        setDocuments([]);
+        setDocumentsError(error.message || "We could not load the documents.");
+      } else {
+        setDocuments(data ?? []);
+        setTotalDocuments(count ?? 0);
+      }
+
+      setIsLoadingDocuments(false);
+    };
+
+    fetchDocuments();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [page, refreshIndex]);
+
+  const totalPages = useMemo(
+    () => (totalDocuments > 0 ? Math.ceil(totalDocuments / PAGE_SIZE) : 0),
+    [totalDocuments],
+  );
+
+  const handleGoToPreviousPage = () => {
+    setPage((prev) => Math.max(prev - 1, 0));
+  };
+
+  const handleGoToNextPage = () => {
+    setPage((prev) => {
+      if (totalPages === 0) return prev;
+      return Math.min(prev + 1, totalPages - 1);
+    });
+  };
+
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setErrorMessage(null);
@@ -134,6 +236,8 @@ export default function SendFilePage() {
       setSuccessMessage("Document uploaded successfully.");
       setFormValues(initialFormState);
       removeSelectedFile();
+      setPage(0);
+      setRefreshIndex((prev) => prev + 1);
     } catch (error: unknown) {
       setErrorMessage(
         error instanceof Error
@@ -147,13 +251,12 @@ export default function SendFilePage() {
 
   return (
     <section className="min-h-[calc(100vh-4rem)] w-full text-slate-100">
-      <div className="mx-auto flex h-full w-full max-w-3xl items-center justify-center px-4 py-12">
+      <div className="mx-auto flex h-full w-full max-w-4xl flex-col gap-8 px-4 py-12">
         <Card className="w-full border-slate-800 bg-slate-900/80 text-slate-100 shadow-2xl shadow-black/40 backdrop-blur">
           <CardHeader className="space-y-2">
             <CardTitle className="text-2xl font-semibold text-slate-100">New document</CardTitle>
             <CardDescription className="text-slate-400">
-              Drag and drop a PDF or Word file; we will store it in Supabase together with its
-              metadata.
+              Save a PDF or Word file; we will store it together with its metadata.
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -165,7 +268,7 @@ export default function SendFilePage() {
                 <Input
                   id="title"
                   name="title"
-                  placeholder="Manual de Operaciones"
+                  placeholder="Operations manual"
                   required
                   value={formValues.title}
                   onChange={handleTextChange("title")}
@@ -205,7 +308,6 @@ export default function SendFilePage() {
                   onChange={handleFileChange}
                 />
                 <p className="text-center text-sm text-slate-300">
-                  Drag your file here or{" "}
                   <button
                     type="button"
                     onClick={() => fileInputRef.current?.click()}
@@ -255,6 +357,111 @@ export default function SendFilePage() {
                 </Button>
               </div>
             </form>
+          </CardContent>
+        </Card>
+        <Card className="w-full border-slate-800 bg-slate-900/80 text-slate-100 shadow-2xl shadow-black/40 backdrop-blur">
+          <CardHeader className="space-y-2">
+            <CardTitle className="text-xl font-semibold text-slate-100">Recent documents</CardTitle>
+            <CardDescription className="text-slate-400">
+              Review the upload history and check the processing status for each file.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="overflow-hidden rounded-lg border border-slate-800">
+              <table className="min-w-full divide-y divide-slate-800">
+                <thead className="bg-slate-900/90 text-xs uppercase tracking-wide text-slate-400">
+                  <tr>
+                    <th scope="col" className="px-4 py-3 text-left font-medium">
+                      Title
+                    </th>
+                    <th scope="col" className="px-4 py-3 text-left font-medium">
+                      Extension
+                    </th>
+                    <th scope="col" className="px-4 py-3 text-left font-medium">
+                      Uploaded
+                    </th>
+                    <th scope="col" className="px-4 py-3 text-left font-medium">
+                      Status
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800 bg-slate-950/40 text-sm text-slate-200">
+                  {isLoadingDocuments &&
+                    Array.from({ length: PAGE_SIZE }).map((_, index) => (
+                      <tr key={`skeleton-${index}`} className="animate-pulse">
+                        <td className="px-4 py-4">
+                          <div className="h-4 w-40 rounded bg-slate-800/80" />
+                        </td>
+                        <td className="px-4 py-4">
+                          <div className="h-4 w-16 rounded bg-slate-800/80" />
+                        </td>
+                        <td className="px-4 py-4">
+                          <div className="h-4 w-32 rounded bg-slate-800/80" />
+                        </td>
+                        <td className="px-4 py-4">
+                          <div className="h-4 w-24 rounded bg-slate-800/80" />
+                        </td>
+                      </tr>
+                    ))}
+
+                  {!isLoadingDocuments && documents.length === 0 && (
+                    <tr>
+                      <td colSpan={4} className="px-4 py-8 text-center text-sm text-slate-500">
+                        No documents have been uploaded yet.
+                      </td>
+                    </tr>
+                  )}
+
+                  {!isLoadingDocuments &&
+                    documents.map((document) => (
+                      <tr key={document.id} className="transition hover:bg-slate-900/60">
+                        <td className="px-4 py-3">
+                          <p className="font-medium text-slate-100">{document.title}</p>
+                        </td>
+                        <td className="px-4 py-3 text-slate-300">
+                          {formatMimeType(document.mimetype)}
+                        </td>
+                        <td className="px-4 py-3 text-slate-300">
+                          {formatDate(document.created_at)}
+                        </td>
+                        <td className="px-4 py-3">
+                          <span className="inline-flex rounded-md border border-indigo-500/40 bg-indigo-500/10 px-2.5 py-1 text-xs font-semibold uppercase tracking-wide text-indigo-300">
+                            {document.status ?? "—"}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                </tbody>
+              </table>
+            </div>
+
+            {documentsError && <p className="text-sm text-red-400">{documentsError}</p>}
+
+            <div className="flex items-center justify-between text-sm">
+              <p className="text-slate-400">
+                Page {totalPages === 0 ? 0 : page + 1} of {totalPages}
+              </p>
+              <div className="flex items-center gap-3">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={handleGoToPreviousPage}
+                  disabled={page === 0 || totalPages === 0}
+                  className="border border-slate-700 bg-slate-900/60 text-slate-100 hover:bg-slate-800 disabled:opacity-50"
+                >
+                  Previous
+                </Button>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={handleGoToNextPage}
+                  disabled={totalPages === 0 || page >= totalPages - 1}
+                  className="border border-slate-700 bg-slate-900/60 text-slate-100 hover:bg-slate-800 disabled:opacity-50"
+                >
+                  Next
+                </Button>
+              </div>
+            </div>
           </CardContent>
         </Card>
       </div>
