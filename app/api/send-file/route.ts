@@ -123,18 +123,13 @@ export async function POST(request: Request) {
     }
 
     const documentId: number = document.id;
+    console.log("paso por aqui");
+    await qstash.publishJSON({
+      url: `${process.env.NEXT_PUBLIC_BASE_URL}/api/ingest-worker`,
+      body: { documentId, storagePath, mimetype: fileField.type },
+    });
 
-    if (process.env.NODE_ENV === "development") {
-      await fetch("http://localhost:3000/api/ingest-worker", {
-        method: "POST",
-        body: JSON.stringify({ documentId, storagePath, mimetype: fileField.type }),
-      });
-    } else {
-      await qstash.publishJSON({
-        url: `${process.env.NEXT_PUBLIC_BASE_URL}/api/ingest-worker`,
-        body: { documentId, storagePath, mimetype: fileField.type },
-      });
-    }
+    console.log("pase por aqui 2");
 
     return NextResponse.json({ documentId, status: "queued" }, { status: 202 });
 

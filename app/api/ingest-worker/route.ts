@@ -91,7 +91,7 @@ const extractTextFromFile = async (buffer: Buffer, mimeType: string): Promise<st
 export async function POST(req: Request) {
   const { documentId, storagePath, mimetype } = await req.json();
   const supabase = await createClient();
-
+  console.log("me ejecute aqui en ingest", { documentId, storagePath, mimetype });
   try {
     const { data: file } = await supabase.storage.from("documents").download(storagePath);
     const buffer = Buffer.from(await file!.arrayBuffer());
@@ -117,7 +117,6 @@ export async function POST(req: Request) {
         const embedding = data[0]?.embedding;
 
         if (!embedding) {
-          // Skip section if embedding is not available
           continue;
         }
 
@@ -136,6 +135,14 @@ export async function POST(req: Request) {
         }
       }
     }
+    const { error: errorUpdate } = await supabase
+      .from("documents")
+      .update({ status: "ready" })
+      .eq("id", documentId);
+
+    if (errorUpdate) {
+      throw new Error("Can't update document status");
+    }
 
     return NextResponse.json(
       { message: "Document stored successfully.", documentId },
@@ -147,7 +154,6 @@ export async function POST(req: Request) {
       .from("documents")
       .update({ status: "error", error_message: String(e?.message ?? e) })
       .eq("id", documentId);
-    // QStash reintentará según su política
     return NextResponse.json({ ok: false }, { status: 500 });
   }
 }
