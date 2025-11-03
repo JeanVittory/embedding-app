@@ -1,9 +1,8 @@
 import { randomUUID } from "node:crypto";
-
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { z } from "zod";
-import { OpenAI } from "openai";
+import { Client as QStash } from "@upstash/qstash";
 
 export const runtime = "nodejs";
 
@@ -16,62 +15,6 @@ const MAX_FILE_SIZE_BYTES = 15 * 1024 * 1024; // 15 MB
 
 const metadataSchema = z.record(z.string(), z.unknown()).default({});
 
-const splitIntoChunks = (text: string, maxChunkSize = 300): string[] => {
-  const paragraphs = text.replace(/\r\n?/g, "\n").split(/\n+/);
-
-  const sentences = paragraphs.flatMap((p) =>
-    p
-      .split(/(?<=[.!?])\s+/)
-      .map((s) => s.trim())
-      .filter((s) => s.length > 0),
-  );
-
-  const chunks: string[] = [];
-  let current = "";
-
-  for (const sentence of sentences) {
-    if (!current.length) {
-      current = sentence;
-      continue;
-    }
-    if (current.length + 1 + sentence.length <= maxChunkSize) {
-      current += " " + sentence;
-    } else {
-      chunks.push(current);
-      current = sentence;
-    }
-  }
-  if (current.trim().length) chunks.push(current);
-
-  return chunks;
-};
-
-const sanitizeText = (input: string): string => {
-  if (!input) return "";
-
-  const cleaned = Array.from(input)
-    .map((char) => {
-      const codePoint = char.codePointAt(0);
-
-      if (codePoint === undefined) {
-        return "";
-      }
-
-      if (
-        (codePoint <= 31 && codePoint !== 9 && codePoint !== 10 && codePoint !== 13) ||
-        (codePoint >= 0x7f && codePoint <= 0x9f)
-      ) {
-        return " ";
-      }
-
-      return char;
-    })
-    .join("")
-    .replace(/\uFFFD/g, " ");
-
-  return cleaned.trim();
-};
-
 const slugify = (value: string) =>
   value
     .normalize("NFKD")
@@ -80,34 +23,6 @@ const slugify = (value: string) =>
     .toLowerCase()
     .replace(/[\s_-]+/g, "-")
     .replace(/^-+|-+$/g, "") || "document";
-
-const bufferToArrayBuffer = (buffer: Buffer): ArrayBuffer =>
-  buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength) as ArrayBuffer;
-
-const extractTextFromFile = async (buffer: Buffer, mimeType: string): Promise<string> => {
-  if (mimeType === "application/pdf") {
-    const pdfParseModule = await import("pdf-parse");
-    const pdfParse = pdfParseModule.default ?? pdfParseModule;
-    const { text } = await pdfParse(buffer);
-    return sanitizeText(text ?? "");
-  }
-
-  if (mimeType === "application/vnd.openxmlformats-officedocument.wordprocessingml.document") {
-    const mammothModule = await import("mammoth");
-    const extract = mammothModule.extractRawText ?? mammothModule.default?.extractRawText;
-
-    if (!extract) {
-      return "";
-    }
-
-    const { value } = await extract({
-      arrayBuffer: bufferToArrayBuffer(buffer),
-    });
-    return sanitizeText(value ?? "");
-  }
-
-  return "";
-};
 
 const buildStoragePath = (filename: string) => {
   const dotIndex = filename.lastIndexOf(".");
@@ -169,6 +84,8 @@ export async function POST(request: Request) {
     const fileBuffer = Buffer.from(await fileField.arrayBuffer());
 
     const supabase = await createClient();
+    const qstash = new QStash({ token: process.env.QSTASH_TOKEN! });
+
     const storagePath = buildStoragePath(fileField.name);
 
     const { error: uploadError } = await supabase.storage
@@ -193,6 +110,7 @@ export async function POST(request: Request) {
           bytes: fileField.size,
           source: "upload",
           metadata,
+          status: "queued",
         },
       ])
       .select("id")
@@ -205,53 +123,21 @@ export async function POST(request: Request) {
     }
 
     const documentId: number = document.id;
-    let extractedText = "";
 
-    try {
-      extractedText = await extractTextFromFile(fileBuffer, fileField.type);
-    } catch (error) {
-      console.error("Error extracting text from document:", error);
-      extractedText = "";
+    if (process.env.NODE_ENV === "development") {
+      await fetch("http://localhost:3000/api/ingest-worker", {
+        method: "POST",
+        body: JSON.stringify({ documentId, storagePath, mimetype: fileField.type }),
+      });
+    } else {
+      await qstash.publishJSON({
+        url: `${process.env.NEXT_PUBLIC_BASE_URL}/api/ingest-worker`,
+        body: { documentId, storagePath, mimetype: fileField.type },
+      });
     }
 
-    if (extractedText.trim().length) {
-      const chunks = splitIntoChunks(extractedText);
-      const openai = new OpenAI();
+    return NextResponse.json({ documentId, status: "queued" }, { status: 202 });
 
-      for (let index = 0; index < chunks.length; index++) {
-        const chunk = chunks[index];
-        const { data } = await openai.embeddings.create({
-          model: "text-embedding-3-small",
-          input: chunk,
-        });
-
-        const embedding = data[0]?.embedding;
-
-        if (!embedding) {
-          // Skip section if embedding is not available
-          continue;
-        }
-
-        const { error: sectionError } = await supabase.from("document_sections").insert([
-          {
-            document_id: documentId,
-            section_order: index + 1,
-            section_content: chunk,
-            embedding,
-            meta: { source: "upload" },
-          },
-        ]);
-
-        if (sectionError) {
-          throw new Error(sectionError.message || "We could not store the vectorized sections.");
-        }
-      }
-    }
-
-    return NextResponse.json(
-      { message: "Document stored successfully.", documentId },
-      { status: 200 },
-    );
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
   } catch (error: any) {
     const message =
