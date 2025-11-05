@@ -60,18 +60,20 @@ export async function POST(request: NextRequest) {
     const questionEmbedding = embeddingResponse.data[0].embedding;
 
     const matchingSections = await retrieveWithFallback(questionEmbedding, supabase);
+    const hasMatches = matchingSections.length > 0;
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const context = matchingSections.map((section: any) => section.section_content).join("\n\n");
-
+    const context = hasMatches
+      ? matchingSections.map((section) => section.section_content).join("\n\n")
+      : "NO_COINCIDENCE";
     const aiResponse = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       temperature: 1,
-      max_completion_tokens: 100,
+      max_completion_tokens: 150,
       messages: [
         {
           role: "system",
-          content: "Please use the context to improve your ability to answer the question",
+          content:
+            "Use the context if it exists. If the context contains 'NO_COINCIDENCE', thank the user and kindly explain that you cannot respond with the information available.",
         },
         {
           role: "user",
@@ -79,7 +81,7 @@ export async function POST(request: NextRequest) {
                 Using the following informtion please answer the question: 
                 Context: ${context}
                 Question: ${message}
-            `,
+          `,
         },
       ],
     });
