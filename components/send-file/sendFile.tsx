@@ -257,6 +257,7 @@ export default function SendFilePage() {
         bytes: selectedFile.size,
         metadata: formValues.metadata.trim() ? JSON.parse(formValues.metadata) : {},
       };
+
       const res = await fetch("/api/send-file", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -353,9 +354,8 @@ export default function SendFilePage() {
                     onClick={() => fileInputRef.current?.click()}
                     className="font-semibold text-indigo-400 underline-offset-4 hover:underline"
                   >
-                    choose one from your device
+                    Choose one from your device.
                   </button>
-                  .
                 </p>
                 <p className="mt-2 text-center text-xs text-slate-500">
                   PDF or Word (.docx) files are accepted. Recommended max size: 15&nbsp;MB.
