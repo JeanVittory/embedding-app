@@ -1,7 +1,6 @@
 "use client";
 
 import { ChangeEvent, DragEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
-
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -30,6 +29,25 @@ const formatFileSize = (bytes: number) => {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 };
+
+const slugify = (value: string) =>
+  (value || "document")
+    .normalize("NFKD")
+    .replace(/[^\w\s-]/g, "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_-]+/g, "-")
+    .replace(/^-+|-+$/g, "") || "document";
+
+const buildStoragePath = (filename: string) => {
+  const dotIndex = filename.lastIndexOf(".");
+  const ext = dotIndex >= 0 ? filename.slice(dotIndex).toLowerCase() : "";
+  const baseName = dotIndex >= 0 ? filename.slice(0, dotIndex) : filename;
+  const safe = slugify(baseName);
+  return `uploads/${crypto.randomUUID()}-${safe}${ext}`; // siempre con '/'
+};
+
+const DOCUMENTS_BUCKET = "documents"; // tu bucket
 
 const MIME_EXTENSION_MAP: Record<string, string> = {
   "application/pdf": "pdf",
@@ -211,33 +229,55 @@ export default function SendFilePage() {
     setIsSubmitting(true);
 
     try {
+      const supabase = createClient();
       const formData = new FormData();
       formData.append("title", formValues.title.trim());
       if (formValues.metadata.trim()) {
         formData.append("metadata", formValues.metadata.trim());
       }
       formData.append("file", selectedFile);
-      const response = await fetch("/api/send-file", {
-        method: "POST",
-        body: formData,
-      });
+      const storagePath = buildStoragePath(selectedFile.name);
+      const { error: uploadErr } = await supabase.storage
+        .from(DOCUMENTS_BUCKET)
+        .upload(storagePath, selectedFile, {
+          contentType: selectedFile.type || "application/octet-stream",
+          upsert: false,
+        });
 
-      const result = await response.json().catch(() => ({}));
-
-      if (!response.ok) {
-        const detail =
-          typeof result?.error === "string"
-            ? result.error
-            : "We could not upload the document. Please try again.";
-        setErrorMessage(detail);
+      if (uploadErr) {
+        setErrorMessage(uploadErr.message || "We could not upload the file to storage.");
+        setIsSubmitting(false);
         return;
       }
 
-      setSuccessMessage("Document uploaded successfully.");
+      const payload = {
+        title: formValues.title.trim(),
+        storagePath,
+        mimetype: selectedFile.type,
+        bytes: selectedFile.size,
+        metadata: formValues.metadata.trim() ? JSON.parse(formValues.metadata) : {},
+      };
+      const res = await fetch("/api/send-file", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      const result = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setErrorMessage(
+          typeof result?.error === "string" ? result.error : "We could not register the document.",
+        );
+        setIsSubmitting(false);
+        return;
+      }
+
+      setSuccessMessage("Document uploaded successfully (processing in background).");
       setFormValues(initialFormState);
       removeSelectedFile();
       setPage(0);
       setRefreshIndex((prev) => prev + 1);
+      setIsSubmitting(false);
     } catch (error: unknown) {
       setErrorMessage(
         error instanceof Error
