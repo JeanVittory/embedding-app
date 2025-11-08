@@ -78,7 +78,7 @@ export async function POST(request: NextRequest) {
         {
           role: "user",
           content: `
-                Using the following informtion please answer the question: 
+                Using the following information please answer the question: 
                 Context: ${context}
                 Question: ${message}
           `,

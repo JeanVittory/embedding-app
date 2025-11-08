@@ -51,7 +51,10 @@ export async function POST(req: Request) {
           throw new Error(sectionError.message || "We could not store the vectorized sections.");
         }
       }
+    } else {
+      throw new Error("We could not store the vectorized sections.");
     }
+
     const { error: errorUpdate } = await supabase
       .from("documents")
       .update({ status: "ready" })
