@@ -68,6 +68,7 @@ type DocumentRecord = {
   mimetype: string | null;
   created_at: string;
   status: string | null;
+  error_message: string | null;
 };
 
 const formatMimeType = (value: string | null) => {
@@ -171,7 +172,7 @@ export default function SendFilePage() {
 
       const { data, error, count } = await supabase
         .from("documents")
-        .select("id,title,mimetype,created_at,status", { count: "exact" })
+        .select("id,title,mimetype,created_at,status,error_message", { count: "exact" })
         .order("created_at", { ascending: false })
         .range(rangeStart, rangeEnd);
 
@@ -453,24 +454,43 @@ export default function SendFilePage() {
                   )}
 
                   {!isLoadingDocuments &&
-                    documents.map((document) => (
-                      <tr key={document.id} className="transition hover:bg-slate-900/60">
-                        <td className="px-4 py-3">
-                          <p className="font-medium text-slate-100">{document.title}</p>
-                        </td>
-                        <td className="px-4 py-3 text-slate-300">
-                          {formatMimeType(document.mimetype)}
-                        </td>
-                        <td className="px-4 py-3 text-slate-300">
-                          {formatDate(document.created_at)}
-                        </td>
-                        <td className="px-4 py-3">
-                          <span className="inline-flex rounded-md border border-indigo-500/40 bg-indigo-500/10 px-2.5 py-1 text-xs font-semibold uppercase tracking-wide text-indigo-300">
-                            {document.status ?? "—"}
-                          </span>
-                        </td>
-                      </tr>
-                    ))}
+                    documents.map((document) => {
+                      const status = document.status ?? "—";
+                      const normalizedStatus = status === "—" ? status : status.toUpperCase();
+                      const isErrorStatus = status.toLowerCase() === "error";
+                      const tooltipMessage =
+                        isErrorStatus && document.error_message
+                          ? document.error_message
+                          : isErrorStatus
+                            ? "No error details were provided."
+                            : undefined;
+
+                      return (
+                        <tr key={document.id} className="transition hover:bg-slate-900/60">
+                          <td className="px-4 py-3">
+                            <p className="font-medium text-slate-100">{document.title}</p>
+                          </td>
+                          <td className="px-4 py-3 text-slate-300">
+                            {formatMimeType(document.mimetype)}
+                          </td>
+                          <td className="px-4 py-3 text-slate-300">
+                            {formatDate(document.created_at)}
+                          </td>
+                          <td className="px-4 py-3">
+                            <span
+                              className={`inline-flex rounded-md border px-2.5 py-1 text-xs font-semibold uppercase tracking-wide ${
+                                isErrorStatus
+                                  ? "border-red-500/40 bg-red-500/10 text-red-300"
+                                  : "border-indigo-500/40 bg-indigo-500/10 text-indigo-300"
+                              }`}
+                              title={tooltipMessage}
+                            >
+                              {normalizedStatus}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })}
                 </tbody>
               </table>
             </div>
