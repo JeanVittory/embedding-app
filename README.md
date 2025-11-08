@@ -39,12 +39,12 @@ npm run dev
 
 The app runs on <http://localhost:3000>. `/` is the uploader/dashboard and `/ask-question` is the chat-style Q&A surface. Useful npm scripts:
 
-| Script        | Description                                   |
-| ------------- | --------------------------------------------- |
-| `npm run dev` | Run Next.js with Turbopack in development.    |
-| `npm run build` | Production build.                           |
-| `npm start`   | Start the compiled build.                     |
-| `npm run lint`| ESLint across the project.                    |
+| Script          | Description                                |
+| --------------- | ------------------------------------------ |
+| `npm run dev`   | Run Next.js with Turbopack in development. |
+| `npm run build` | Production build.                          |
+| `npm start`     | Start the compiled build.                  |
+| `npm run lint`  | ESLint across the project.                 |
 
 ## Exposing localhost to Upstash with Cloudflared
 
@@ -59,6 +59,7 @@ Upstash must be able to POST to `/api/ingest-worker`. When you run locally there
    ```
 
    Cloudflared prints a public `https://<random>.trycloudflare.com` URL.
+
 4. Set `NEXT_PUBLIC_BASE_URL` to that URL inside `.env.local` and restart `npm run dev`. This is the base that `/api/send-file` uses when publishing QStash jobs.
 5. Keep the tunnel running while testing uploads so QStash can call your ingest worker. For a stable hostname you can create a named tunnel and map it to a Cloudflare-managed subdomain, but the ephemeral tunnel above is usually enough for development.
 
@@ -66,14 +67,14 @@ Upstash must be able to POST to `/api/ingest-worker`. When you run locally there
 
 Create a `.env.local` file and define the following variables (all strings unless noted). The OpenAI SDK automatically reads `OPENAI_API_KEY`.
 
-| Variable | Required | Description |
-| --- | --- | --- |
-| `NEXT_PUBLIC_SUPABASE_URL` | ✅ | Supabase project URL (e.g. `https://xyzcompany.supabase.co`). Used by both client and server helpers. |
-| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | ✅ | Supabase anon/public API key with access to the `documents` tables, storage bucket, and RPCs. |
-| `OPENAI_API_KEY` | ✅ | OpenAI key used by both embedding creation and chat completions inside `/api/ingest-worker` and `/api/ask-question`. |
-| `QSTASH_TOKEN` | ✅ | Upstash QStash token with permission to `publishJSON`, allowing `/api/send-file` to enqueue ingestion jobs. |
-| `NEXT_PUBLIC_BASE_URL` | ✅ in dev/self-hosted | Absolute base URL that QStash should call (e.g. your `cloudflared` tunnel or production domain). Defaults to `https://$VERCEL_URL` on Vercel, falls back to `http://localhost:3000` but that only works when QStash can reach localhost. |
-| `VERCEL_URL` | ℹ️ auto | Injected by Vercel at runtime; only mentioned for completeness. |
+| Variable                               | Required              | Description                                                                                                                                                                                                                              |
+| -------------------------------------- | --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `NEXT_PUBLIC_SUPABASE_URL`             | ✅                    | Supabase project URL (e.g. `https://xyzcompany.supabase.co`). Used by both client and server helpers.                                                                                                                                    |
+| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | ✅                    | Supabase anon/public API key with access to the `documents` tables, storage bucket, and RPCs.                                                                                                                                            |
+| `OPENAI_API_KEY`                       | ✅                    | OpenAI key used by both embedding creation and chat completions inside `/api/ingest-worker` and `/api/ask-question`.                                                                                                                     |
+| `QSTASH_TOKEN`                         | ✅                    | Upstash QStash token with permission to `publishJSON`, allowing `/api/send-file` to enqueue ingestion jobs.                                                                                                                              |
+| `NEXT_PUBLIC_BASE_URL`                 | ✅ in dev/self-hosted | Absolute base URL that QStash should call (e.g. your `cloudflared` tunnel or production domain). Defaults to `https://$VERCEL_URL` on Vercel, falls back to `http://localhost:3000` but that only works when QStash can reach localhost. |
+| `VERCEL_URL`                           | ℹ️ auto               | Injected by Vercel at runtime; only mentioned for completeness.                                                                                                                                                                          |
 
 > Tip: restart `npm run dev` every time you change `.env.local`, otherwise Next.js will not pick up the new values.
 
@@ -84,4 +85,4 @@ Create a `.env.local` file and define the following variables (all strings unles
 - When running locally, keep an eye on the Cloudflared console and the Next.js logs; failed ingestion jobs will mark the document as `error` and can be retried by re-uploading.
 - The question endpoint currently allows up to 2,000 characters. Tune the prompts, token limits, or models in `app/api/ask-question/route.tsx` if you need different behavior.
 
-With these steps you can run the full ingestion + retrieval pipeline locally, test end-to-end with Upstash, and deploy to production using the same configuration. Happy building!
+With these steps you can run the full ingestion + retrieval pipeline locally, test end-to-end with Upstash, and deploy to production using the same configuration.
